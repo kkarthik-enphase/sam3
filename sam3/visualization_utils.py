@@ -69,21 +69,21 @@ def draw_box_on_image(image, box, color=(0, 255, 0)):
     # Get the pixel data
     pixels = image.load()
     # Draw the top and bottom edges
-    for i in range(x, x + w):
-        pixels[i, y] = color
-        pixels[i, y + h - 1] = color
-        pixels[i, y + 1] = color
-        pixels[i, y + h] = color
-        pixels[i, y - 1] = color
-        pixels[i, y + h - 2] = color
-    # Draw the left and right edges
-    for j in range(y, y + h):
-        pixels[x, j] = color
-        pixels[x + 1, j] = color
-        pixels[x - 1, j] = color
-        pixels[x + w - 1, j] = color
-        pixels[x + w, j] = color
-        pixels[x + w - 2, j] = color
+    # for i in range(x, x + w):
+    #     pixels[i, y] = color
+    #     pixels[i, y + h - 1] = color
+    #     pixels[i, y + 1] = color
+    #     pixels[i, y + h] = color
+    #     pixels[i, y - 1] = color
+    #     pixels[i, y + h - 2] = color
+    # # Draw the left and right edges
+    # for j in range(y, y + h):
+    #     pixels[x, j] = color
+    #     pixels[x + 1, j] = color
+    #     pixels[x - 1, j] = color
+    #     pixels[x + w - 1, j] = color
+    #     pixels[x + w, j] = color
+    #     pixels[x + w - 2, j] = color
     return image
 
 
@@ -128,7 +128,7 @@ def plot_bbox(
         facecolor="none",
         linestyle=linestyle,
     )
-    ax.add_patch(rect)
+    # ax.add_patch(rect)
     if text is not None:
         facecolor = "w"
         ax.text(
@@ -863,15 +863,15 @@ def plot_results(img, results):
         plot_mask(results["masks"][i].squeeze(0).cpu(), color=color)
         w, h = img.size
         prob = results["scores"][i].item()
-        plot_bbox(
-            h,
-            w,
-            results["boxes"][i].cpu(),
-            text=f"(id={i}, {prob=:.2f})",
-            box_format="XYXY",
-            color=color,
-            relative_coords=False,
-        )
+        # plot_bbox(
+        #     h,
+        #     w,
+        #     results["boxes"][i].cpu(),
+        #     text=f"(id={i}, {prob=:.2f})",
+        #     box_format="XYXY",
+        #     color=color,
+        #     relative_coords=False,
+        # )
 
 
 def single_visualization(img, anns, title):

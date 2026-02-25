@@ -451,6 +451,8 @@ class Sam3Image(torch.nn.Module):
                 backbone_out, find_input, geometric_prompt
             )
         # Run the encoder
+        # print('model forward grounding:',find_input, prompt, prompt_mask)
+        prompt = torch.nan_to_num(prompt, nan=0.0, posinf=1e4, neginf=-1e4)
         with torch.profiler.record_function("SAM3Image._run_encoder"):
             backbone_out, encoder_out, _ = self._run_encoder(
                 backbone_out, find_input, prompt, prompt_mask
@@ -518,7 +520,7 @@ class Sam3Image(torch.nn.Module):
             ].unsqueeze(1)
 
         return out
-
+      
     def _get_dummy_prompt(self, num_prompts=1):
         device = self.device
         geometric_prompt = Prompt(
@@ -528,11 +530,27 @@ class Sam3Image(torch.nn.Module):
         return geometric_prompt
 
     def forward(self, input: BatchedDatapoint):
+        import traceback
+        # traceback.print_stack()
         device = self.device
         backbone_out = {"img_batch_all_stages": input.img_batch}
         backbone_out.update(self.backbone.forward_image(input.img_batch))
+        # print('Backbone keys:',backbone_out.keys())
+
+        # 2. Check Vision Features
+        # 'vision_features' or 'backbone_fpn' are common keys here
+        for key in ["vision_features", "backbone_fpn", "sam2_backbone_out"]:
+            if key in backbone_out:
+                feat = backbone_out[key]
+                # Handle list/dict outputs from FPN
+                is_nan = any(torch.isnan(v).any() for v in backbone_out.values() if torch.is_tensor(v))
+                if is_nan:
+                    print(f"!!! [DEBUG] Vision Backbone FAILED: {key} is NaN")        
         num_frames = len(input.find_inputs)
         assert num_frames == 1
+
+
+        # print(f"Text Batch: {input.find_text_batch}") # See if it's "house", "roof", etc.
 
         text_outputs = self.backbone.forward_text(input.find_text_batch, device=device)
         backbone_out.update(text_outputs)
@@ -543,6 +561,9 @@ class Sam3Image(torch.nn.Module):
 
         find_input = input.find_inputs[0]
         find_target = input.find_targets[0]
+        # print(f"INPUT Boxes: {find_input.input_boxes.shape if find_input.input_boxes is not None else 'None'}")
+        # print(f"TARGET Boxes: {find_target.boxes.shape if hasattr(find_target, 'boxes') else 'N/A'}")
+        # print(f"TARGET Masks: {find_target.segments.shape if hasattr(find_target, 'segments') else 'N/A'}")
 
         if find_input.input_points is not None and find_input.input_points.numel() > 0:
             print("Warning: Point prompts are ignored in PCS.")
@@ -553,6 +574,19 @@ class Sam3Image(torch.nn.Module):
             box_mask=find_input.input_boxes_mask,
             box_labels=find_input.input_boxes_label,
         )
+
+        # Inside forward, after defining find_target
+        # if self.training:
+            # Check if any target boxes are NAN or INF
+            # if torch.isnan(find_target.boxes).any() or torch.isinf(find_target.boxes).any():
+            #     print(f"!!! CRITICAL: Target Boxes contain NaN/Inf in image {input.img_ids}")
+
+            # # Check for Zero-Area Boxes (Common in aerial/DSM data)
+            # # Boxes are usually [cx, cy, w, h]
+            # widths = find_target.boxes[:, :, 2]
+            # heights = find_target.boxes[:, :, 3]
+            # if (widths <= 0).any() or (heights <= 0).any():
+            #     print(f"!!! WARNING: Found zero-area target boxes. Count: {(widths <= 0).sum()}")
 
         # Init vars that are shared across the loop.
         stage_outs = []
@@ -571,7 +605,6 @@ class Sam3Image(torch.nn.Module):
                 geometric_prompt=geometric_prompt.clone(),
             )
             stage_outs.append(out)
-
         previous_stages_out.append(stage_outs)
         return previous_stages_out
 

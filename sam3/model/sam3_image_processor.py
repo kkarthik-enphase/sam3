@@ -39,6 +39,22 @@ class Sam3Processor:
         )
 
     @torch.inference_mode()
+    def add_point_prompt(self, points: List[List[float]], labels: List[int], state: Dict):
+
+        pt_tensor = torch.tensor(points, device=self.device, dtype=torch.float32).view(1, -1, 2)
+        # lbl_tensor = torch.tensor(labels, device=self.device, dtype=torch.long).view(1, -1)
+
+        # Update the FindStage object specifically for this forward pass
+        # input_points_mask usually indicates validity of the point (all 1s if all points are used)
+        self.find_stage.input_points = pt_tensor
+        # self.find_stage.input_points_mask = torch.ones(lbl_tensor.shape, device=self.device, dtype=torch.bool)
+        
+        # Note: If your SAM3 version uses labels in geometric_prompt:
+        # state["geometric_prompt"].append_points(pt_tensor, lbl_tensor)
+
+        # return self._forward_grounding(state)
+
+    @torch.inference_mode()
     def set_image(self, image, state=None):
         """Sets the image on which we want to do predictions."""
         if state is None:
@@ -115,7 +131,6 @@ class Sam3Processor:
 
         if "backbone_out" not in state:
             raise ValueError("You must call set_image before set_text_prompt")
-
         text_outputs = self.model.backbone.forward_text([prompt], device=self.device)
         # will erase the previous text prompt if any
         state["backbone_out"].update(text_outputs)
@@ -187,7 +202,8 @@ class Sam3Processor:
             geometric_prompt=state["geometric_prompt"],
             find_target=None,
         )
-
+        # print('state["geometric_prompt"]:',state["geometric_prompt"])
+        # print('find_input:',self.find_stage)
         out_bbox = outputs["pred_boxes"]
         out_logits = outputs["pred_logits"]
         out_masks = outputs["pred_masks"]

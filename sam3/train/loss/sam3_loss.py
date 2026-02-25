@@ -156,6 +156,24 @@ class Sam3LossWrapper(torch.nn.Module):
                     losses.update({f"{k}{suffix}_o2m": v for k, v in l_dict.items()})
 
         losses[CORE_LOSS_KEY] = total_core_loss
+        # --- CRITICAL STABILITY PATCH ---
+        
+        if torch.isnan(losses[CORE_LOSS_KEY]).any() or torch.isinf(losses[CORE_LOSS_KEY]).any():
+            # Replace NaNs/Infs with a large, finite number (1e8) to flag the bad batch 
+            # and allow the optimizer to step, but prevent the crash.
+
+            original_value = losses[CORE_LOSS_KEY].detach().cpu().item()
+            print(f"UNSTABLE LOSS DETECTED: Original CORE_LOSS_KEY value was {original_value} ")
+            losses[CORE_LOSS_KEY] = torch.nan_to_num(
+                losses[CORE_LOSS_KEY], 
+                nan=0.00001, 
+                posinf=1.0, 
+                neginf=1.0
+            )
+            changed_value = losses[CORE_LOSS_KEY].detach().cpu().item()
+            print(f"NEW LOSS: NEW CORE_LOSS_KEY value was {changed_value} ")
+            print("WARNING: NaN or Inf detected in CORE_LOSS_KEY. Clamped loss for stability.")
+        # --- END PATCH ---
         return losses
 
     def forward(self, find_stages: SAM3Output, find_targets):

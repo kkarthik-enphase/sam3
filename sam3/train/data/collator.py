@@ -135,23 +135,25 @@ def collate_fn_api_with_chunking(
 
 
 def collate_fn_api(
-    batch: List[Datapoint],
+    batch: List,  # Changed to List for generality, assuming it holds Datapoint objects
     dict_key,
-    with_seg_masks=False,
+    with_seg_masks=False, # <--- **THIS MUST BE SET TO TRUE IN YOUR DATALOADER CONFIG!**
     input_points_embedding_dim=257,
     repeats: int = 0,
     load_image_in_fp16: bool = False,
 ):
-    # img_batch = torch.stack(sum([[img.data for img in v.images] for v in batch], []))
     img_batch = []
     text_batch = []
     raw_images = None
 
+    # Calculate number of processing stages (usually 1 for single-step training)
     num_stages = (
         max(q.query_processing_order for data in batch for q in data.find_queries) + 1
     )
 
+    # Initialize lists to hold data for each stage
     stages = [
+        # Assuming FindStage is a dataclass/structure containing the input prompts
         FindStage(
             img_ids=[],
             text_ids=[],
@@ -165,6 +167,7 @@ def collate_fn_api(
         for _ in range(num_stages)
     ]
     find_targets = [
+        # Assuming BatchedFindTarget is a structure containing the ground truth
         BatchedFindTarget(
             num_boxes=[],
             boxes=[],
@@ -228,6 +231,7 @@ def collate_fn_api(
                 assert q.input_bbox.numel() % 4 == 0
                 assert q.input_bbox_label is not None
                 nb_boxes = q.input_bbox.numel() // 4
+                # print(f"DEBUG 1a: INPUT BOXES FOUND. Count: {nb_boxes}. (This is good)")
                 assert len(q.input_bbox_label) == nb_boxes
                 stages[stage_id].input_boxes.append(q.input_bbox.view(nb_boxes, 4))
                 stages[stage_id].input_boxes_label.append(
@@ -237,6 +241,7 @@ def collate_fn_api(
                     torch.zeros(nb_boxes, dtype=torch.bool)
                 )
             else:
+                # print(f"DEBUG 1b: INPUT BOXES MISSING. Setting to 0 count. (Need to fix upstream)")
                 stages[stage_id].input_boxes.append(torch.zeros(0, 4))
                 stages[stage_id].input_boxes_label.append(
                     torch.zeros(0, dtype=torch.bool)
@@ -244,26 +249,13 @@ def collate_fn_api(
                 stages[stage_id].input_boxes_mask.append(
                     torch.ones(0, dtype=torch.bool)
                 )
-
-            if q.input_points is not None:
-                stages[stage_id].input_points.append(
-                    q.input_points.squeeze(0)  # Strip a trivial batch index
-                )
-                # All masks will be padded up to the longest length
-                # with 1s before final conversion to batchd tensors
-                stages[stage_id].input_points_mask.append(
-                    torch.zeros(q.input_points.shape[1])
-                )
-            else:
-                stages[stage_id].input_points.append(
-                    torch.empty(0, input_points_embedding_dim)
-                )
-                stages[stage_id].input_points_mask.append(torch.empty(0))
-
             current_out_boxes = []
             current_out_object_ids = []
-            # Set the object ids referred to by this query
             stages[stage_id].object_ids.append(q.object_ids_output)
+            
+            num_targets_in_query = len(q.object_ids_output)
+            # print(f"DEBUG 2: TARGET BOXES (Ground Truth) Count: {num_targets_in_query}")
+            
             for object_id in q.object_ids_output:
                 current_out_boxes.append(
                     data.images[q.image_id].objects[object_id].bbox
@@ -277,11 +269,15 @@ def collate_fn_api(
             find_targets[stage_id].num_boxes.append(len(current_out_boxes))
             find_targets[stage_id].is_exhaustive.append(q.is_exhaustive)
 
+            # --- DEBUG 3: Mask Loading Status (The N/A Problem) ---
             if with_seg_masks:
+                # print("DEBUG 3a: Segmentation Masks are ENABLED.")
                 current_seg_mask = []
                 current_is_valid_segment = []
+                # print("Len of total target objects:", len(q.object_ids_output))
                 for object_id in q.object_ids_output:
                     seg_mask = data.images[q.image_id].objects[object_id].segment
+                    
                     if seg_mask is not None:
                         current_seg_mask.append(seg_mask)
                         current_is_valid_segment.append(1)
@@ -302,7 +298,6 @@ def collate_fn_api(
                 find_targets[stage_id].semantic_segments.append(q.semantic_target)
 
         offset_img_id += len(data.images)
-
     # Pad input points to equal sequence lengths
     for i in range(len(stages)):
         stages[i].input_points = pad_tensor_list_to_longest(
@@ -338,7 +333,6 @@ def collate_fn_api(
         find_targets[i].object_ids_padded = packed_to_padded_naive(
             find_targets[i].object_ids, find_targets[i].num_boxes, fill_value=-1
         )
-
     # Finalize the image batch
     # check sizes
     for img in img_batch[1:]:

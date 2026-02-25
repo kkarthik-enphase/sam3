@@ -16,8 +16,18 @@ from torch import nn
 def _do_matching(cost, repeats=1, return_tgt_indices=False, do_filtering=False):
     if repeats > 1:
         cost = np.tile(cost, (1, repeats))
-
-    i, j = linear_sum_assignment(cost)
+    
+    cost_tensor = torch.from_numpy(cost)
+    
+    # 2. Apply numerical stability fix on the Tensor (disqualifies NaNs/Infs)
+    cost_tensor_clean = torch.nan_to_num(
+        cost_tensor, nan=1e10, posinf=1e10, neginf=1e10
+    )
+    
+    # 3. Convert the clean Tensor back to NumPy array (required by linear_sum_assignment)
+    cost_clean = cost_tensor_clean.cpu().numpy()
+    
+    i, j = linear_sum_assignment(cost_clean)
     if do_filtering:
         # filter out invalid entries (i.e. those with cost > 1e8)
         valid_thresh = 1e8

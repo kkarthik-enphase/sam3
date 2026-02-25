@@ -402,10 +402,73 @@ class Trainer:
                 self._call_model_initializer()
             self._load_resuming_checkpoint(ckpt_path)
 
+    import torch
+    import torch.nn as nn
+    import logging
+
+    def count_trainable_parameters(self, model: nn.Module):
+        """
+        Counts the total and trainable parameters in a PyTorch model.
+        """
+        # Ensure the model is the unwrapped module if it's inside DDP
+        model = unwrap_ddp_if_wrapped(model) 
+        
+        trainable_parameters = 0
+        total_parameters = 0
+
+        for name, param in model.named_parameters():
+            num_params = param.numel()
+            total_parameters += num_params
+            
+            if param.requires_grad:
+                trainable_parameters += num_params
+                
+        non_trainable_parameters = total_parameters - trainable_parameters
+        
+        # Log the results
+        logging.info("--- Final Parameter Summary ---")
+        logging.info(f"\tTotal parameters: {get_human_readable_count(total_parameters)}")
+        logging.info(f"\tTrainable parameters: {get_human_readable_count(trainable_parameters)}")
+        logging.info(f"\tNon-Trainable parameters: {get_human_readable_count(non_trainable_parameters)}")
+        logging.info("-----------------------------")
+
+# ?? Note: This requires the helper function 'get_human_readable_count' and 'unwrap_ddp_if_wrapped'
+# to be defined or imported from your trainer.py file.
+# You will need to pass your instantiated model (e.g., self.model) to this function.
+
+
     def _init_model_state(self):
-        # Checking that parameters that won't be saved are indeed frozen
-        # We do this check here before even saving the model to catch errors
-        # are early as possible and not at the end of the first epoch
+        logging.info("--- Initiating Model Layer Freezing ---")
+        
+        # 1. Freeze the ENTIRE Vision Backbone
+        # trunk contains all blocks (0-31), patch_embed, and pos_embed
+        for name, param in self.model.backbone.vision_backbone.named_parameters():
+            param.requires_grad = False
+        logging.info("Vision Backbone: [FROZEN]")
+
+        # 2. Freeze the ENTIRE Language Backbone
+        # Prevents weights from shifting for your fixed "roof facets" prompt
+        for name, param in self.model.backbone.language_backbone.named_parameters():
+            param.requires_grad = False
+        logging.info("Language Backbone: [FROZEN]")
+
+        # 3. Ensure the Heads and Decoder are TRAINABLE
+        # We explicitly check for these to be safe
+        trainable_components = ['transformer', 'segmentation_head', 'geometry_encoder', 'dot_prod_scoring']
+        
+        for name, param in self.model.named_parameters():
+            if any(comp in name for comp in trainable_components):
+                # Only unfreeze if it's not part of the backbones we just froze
+                if "backbone" not in name:
+                    print('Training layers:',name)
+                    param.requires_grad = True
+
+        logging.info("Transformer Decoder & Segmentation Heads: [TRAINABLE]")
+        logging.info("Feature freezing complete.")
+    
+
+        self.count_trainable_parameters(self.model)
+        # --- END: INSERT FREEZING LOGIC HERE ---
         assert_skipped_parameters_are_frozen(
             patterns=self.checkpoint_conf.skip_saving_parameters,
             model=self.model,

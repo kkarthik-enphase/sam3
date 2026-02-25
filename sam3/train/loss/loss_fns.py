@@ -87,6 +87,9 @@ def dice_loss(inputs, targets, num_boxes, loss_on_multimask=False, reduce=True):
     """
     try:
         loss = _dice_loss(inputs, targets, num_boxes, loss_on_multimask, reduce)
+        # Numerical stability: clamp loss to prevent explosion
+        if isinstance(loss, torch.Tensor):
+            loss = torch.clamp(loss, min=0.0, max=100.0)
     except torch.OutOfMemoryError:
         logging.error("GPU OOM, computing dice loss on CPU")
         # try to recover from GPU OOM by moving tensors to CPU and computing loss there
@@ -147,12 +150,17 @@ def sigmoid_focal_loss(
     Returns:
         Loss tensor
     """
+    # Numerical stability: clamp inputs to prevent extreme values
+    inputs = torch.clamp(inputs, min=-50.0, max=50.0)
+    
     if not (0 <= alpha <= 1) and triton:
         raise RuntimeError(f"Alpha should be in [0,1], got {alpha}")
     if triton:
         if reduce and not loss_on_multimask:
             loss = triton_sigmoid_focal_loss_reduce(inputs, targets, alpha, gamma)
-            return loss / (num_boxes * inputs.shape[1])
+            # Numerical stability: ensure num_boxes is at least 1
+            num_boxes = max(num_boxes, 1) if isinstance(num_boxes, (int, float)) else torch.clamp(num_boxes, min=1)
+            return torch.clamp(loss / (num_boxes * inputs.shape[1]), min=0.0, max=100.0)
 
         loss = triton_sigmoid_focal_loss(inputs, targets, alpha, gamma)
     else:
@@ -172,7 +180,7 @@ def sigmoid_focal_loss(
         # loss is [N, M, H, W] where M corresponds to multiple predicted masks
         assert loss.dim() == 4
         return loss.flatten(2).mean(-1) / num_boxes  # average over spatial dims
-    return loss.mean(1).sum() / num_boxes
+    return torch.clamp(loss.mean(1).sum() / num_boxes, min=0.0, max=100.0)
 
 
 def iou_loss(

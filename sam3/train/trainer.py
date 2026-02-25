@@ -440,30 +440,34 @@ class Trainer:
     def _init_model_state(self):
         logging.info("--- Initiating Model Layer Freezing ---")
         
+        # First, set all parameters to trainable
+        for param in self.model.parameters():
+            param.requires_grad = True
+        
         # 1. Freeze the ENTIRE Vision Backbone
         # trunk contains all blocks (0-31), patch_embed, and pos_embed
+        frozen_count = 0
         for name, param in self.model.backbone.vision_backbone.named_parameters():
             param.requires_grad = False
-        logging.info("Vision Backbone: [FROZEN]")
+            frozen_count += 1
+        logging.info(f"Vision Backbone: [FROZEN] ({frozen_count} parameters)")
 
         # 2. Freeze the ENTIRE Language Backbone
         # Prevents weights from shifting for your fixed "roof facets" prompt
+        frozen_count = 0
         for name, param in self.model.backbone.language_backbone.named_parameters():
             param.requires_grad = False
-        logging.info("Language Backbone: [FROZEN]")
+            frozen_count += 1
+        logging.info(f"Language Backbone: [FROZEN] ({frozen_count} parameters)")
 
-        # 3. Ensure the Heads and Decoder are TRAINABLE
-        # We explicitly check for these to be safe
-        trainable_components = ['transformer', 'segmentation_head', 'geometry_encoder', 'dot_prod_scoring']
-        
+        # 3. Log trainable components
+        trainable_count = 0
         for name, param in self.model.named_parameters():
-            if any(comp in name for comp in trainable_components):
-                # Only unfreeze if it's not part of the backbones we just froze
-                if "backbone" not in name:
-                    print('Training layers:',name)
-                    param.requires_grad = True
+            if param.requires_grad:
+                trainable_count += 1
+                logging.debug(f'Trainable: {name}')
 
-        logging.info("Transformer Decoder & Segmentation Heads: [TRAINABLE]")
+        logging.info(f"Transformer Decoder & Segmentation Heads: [TRAINABLE] ({trainable_count} parameters)")
         logging.info("Feature freezing complete.")
     
 

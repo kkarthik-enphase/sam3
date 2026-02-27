@@ -8,7 +8,7 @@ defaults:
 paths:
   roboflow_vl_100_root: '/mnt/harddrive/data/dataset/sam3_format'
   experiment_log_dir: '/mnt/harddrive/data/dataset/sam3_format/sam3_logs'
-  bpe_path: '/home/kkarthik/ARD/sam3/sam3/../assets/bpe_simple_vocab_16e6.txt.gz' # This should be under assets/bpe_simple_vocab_16e6.txt.gz
+  bpe_path: '/mnt/harddrive/amkumar/segment-anything-3/sam3/assets/bpe_simple_vocab_16e6.txt.gz' # This should be under assets/bpe_simple_vocab_16e6.txt.gz
 
 # Roboflow dataset configuration
 roboflow_train:
@@ -205,7 +205,7 @@ scratch:
   val_norm_std: [0.5, 0.5, 0.5]
 
   # Training parameters
-  num_train_workers: 10
+  num_train_workers: 2
   num_val_workers: 0
   max_data_epochs: 20
   target_epoch_size: 1500
@@ -233,10 +233,11 @@ scratch:
     with_seg_masks: ${scratch.enable_segmentation} # Note: Set this to true if using segmentation masks!
 
   gradient_accumulation_steps: 4
-  train_batch_size: 1
+  train_batch_size: 4
   collate_fn:
-    _target_: sam3.train.data.collator.collate_fn_api
+    _target_: sam3.train.data.collator.collate_fn_api_with_chunking
     _partial_: true
+    num_chunks: ${scratch.gradient_accumulation_steps}
     repeats: ${scratch.hybrid_repeats}
     dict_key: all
     with_seg_masks: ${scratch.enable_segmentation} # Note: Set this to true if using segmentation masks!
@@ -295,7 +296,7 @@ trainer:
       shuffle: True
       batch_size: ${scratch.train_batch_size}
       num_workers: ${scratch.num_train_workers}
-      pin_memory: True
+      pin_memory: False
       drop_last: True
       collate_fn: ${scratch.collate_fn}
 

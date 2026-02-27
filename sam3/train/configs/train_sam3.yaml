@@ -1,0 +1,174 @@
+# @package _global_
+defaults:
+  - _self_
+
+# ============================================================================
+# Paths
+# ============================================================================
+paths:
+  dataset_root: "/mnt/harddrive/data/dataset/sam3_format"
+  images: "/mnt/harddrive/data/dataset/sam3_format/images"
+  annotations: "/mnt/harddrive/data/dataset/sam3_format/coco_annotations.json"
+  experiment_log_dir: "/mnt/harddrive/data/dataset/sam3_format/sam3_logs"
+  bpe_path: "/home/kkarthik/ARD/sam3/assets/bpe_simple_vocab_16e6.txt.gz"
+
+# ============================================================================
+# Dataset Config (FULL TRAIN ONLY)
+# ============================================================================
+dataset:
+  load_segmentation: True
+  img_folder: ${paths.images}
+  ann_file: ${paths.annotations}
+
+  train_transforms:
+    - _target_: sam3.train.transforms.basic_for_api.ComposeAPI
+      transforms:
+        - _target_: sam3.train.transforms.segmentation.DecodeRle
+
+        - _target_: sam3.train.transforms.basic_for_api.RandomResizeAPI
+          sizes: ${scratch.resolution}
+          max_size:
+            _target_: sam3.train.transforms.basic.get_random_resize_max_size
+            size: ${scratch.resolution}
+          square: true
+          consistent_transform: False
+
+        - _target_: sam3.train.transforms.basic_for_api.PadToSizeAPI
+          size: ${scratch.resolution}
+          consistent_transform: False
+
+        - _target_: sam3.train.transforms.basic_for_api.ToTensorAPI
+
+        - _target_: sam3.train.transforms.basic_for_api.NormalizeAPI
+          mean: ${scratch.train_norm_mean}
+          std: ${scratch.train_norm_std}
+
+  # No validation dataset
+  val_transforms: null
+
+# ============================================================================
+# Scratch Parameters (Model/Train)
+# ============================================================================
+scratch:
+  enable_segmentation: True
+  resolution: 1008
+  consistent_transform: False
+
+  train_norm_mean: [0.5, 0.5, 0.5]
+  train_norm_std: [0.5, 0.5, 0.5]
+  val_norm_mean: [0.5, 0.5, 0.5]
+  val_norm_std: [0.5, 0.5, 0.5]
+
+  d_model: 256
+
+  matcher:
+    _target_: sam3.train.matcher.BinaryHungarianMatcherV2
+    focal: true
+    cost_class: 2.0
+    cost_bbox: 5.0
+    cost_giou: 2.0
+    alpha: 0.25
+    gamma: 2
+    stable: False
+
+  scale_by_find_batch_size: True
+  num_train_workers: 10
+  val_batch_size: 1
+  train_batch_size: 1
+  max_ann_per_img: 200
+
+# ============================================================================
+# Trainer
+# ============================================================================
+trainer:
+  _target_: sam3.train.trainer.Trainer
+  skip_saving_ckpts: false
+  skip_first_val: True
+  max_epochs: 20
+  accelerator: cuda
+  seed_value: 123
+
+  # disable validation completely
+  val_epoch_freq: 99999
+
+  mode: train
+  gradient_accumulation_steps: 1
+
+  data:
+    train:
+      _target_: sam3.train.data.torch_dataset.TorchDataset
+      dataset:
+        _target_: sam3.train.data.sam3_image_dataset.Sam3ImageDataset
+        load_segmentation: True
+        img_folder: ${dataset.img_folder}
+        ann_file: ${dataset.ann_file}
+        transforms: ${dataset.train_transforms}
+        multiplier: 1
+        training: true
+
+      shuffle: True
+      batch_size: ${scratch.train_batch_size}
+      num_workers: ${scratch.num_train_workers}
+      pin_memory: True
+      drop_last: True
+      collate_fn:
+        _target_: sam3.train.data.collator.collate_fn_api
+        _partial_: true
+        repeats: 1
+        dict_key: all
+        with_seg_masks: True
+
+    val: null
+
+  model:
+    _target_: sam3.model_builder.build_sam3_image_model
+    bpe_path: ${paths.bpe_path}
+    device: cpus
+    eval_mode: false
+    enable_segmentation: True
+
+  optim:
+    amp:
+      enabled: True
+      amp_dtype: bfloat16
+
+    optimizer:
+      _target_: torch.optim.AdamW
+
+    gradient_clip:
+      _target_: sam3.train.optim.optimizer.GradientClipper
+      max_norm: 0.1
+      norm_type: 2
+
+    options:
+      lr:
+        - scheduler:
+            _target_: sam3.train.optim.schedulers.InverseSquareRootParamScheduler
+            base_lr: 1e-4
+            timescale: 20
+            warmup_steps: 20
+            cooldown_steps: 20
+
+      weight_decay:
+        - scheduler:
+            _target_: fvcore.common.param_scheduler.ConstantParamScheduler
+            value: 0.1
+
+  checkpoint:
+    save_dir: ${paths.experiment_log_dir}/checkpoints
+    save_freq: 1
+
+  logging:
+    tensorboard_writer:
+      _target_: sam3.train.utils.logger.make_tensorboard_logger
+      log_dir: ${paths.experiment_log_dir}/tensorboard
+      flush_secs: 120
+      should_log: True
+
+# ============================================================================
+# Launcher
+# ============================================================================
+launcher:
+  num_nodes: 1
+  gpus_per_node: 1
+  experiment_log_dir: ${paths.experiment_log_dir}
